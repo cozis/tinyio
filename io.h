@@ -162,3 +162,12 @@ bool io_start_accept(struct io_context *ioc, io_handle handle,
  */
 void io_wait(struct io_context *ioc,
              struct io_event *ev);
+
+io_handle io_open_file(struct io_context *ioc,
+                       const char *name, int flags);
+
+io_handle io_create_file(struct io_context *ioc,
+                         const char *name, int flags);
+
+io_handle io_listen(struct io_context *ioc,
+                    const char *addr, int port);

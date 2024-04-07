@@ -1,2 +1,5 @@
 all:
-	gcc example.c io_win.c io_linux.c -o example -Wall -Wextra -ggdb
+	gcc example.c io.c -o example -Wall -Wextra -ggdb
+
+clean:
+	rm example example.exe
