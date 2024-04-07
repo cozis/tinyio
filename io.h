@@ -61,8 +61,14 @@ enum io_optype {
 };
 
 struct io_operation {
-    enum io_optype type; // =IO_VOID when the struct is unused
+
     void *user;
+
+    enum io_optype type;
+
+    #if IO_PLATFORM_LINUX
+    io_handle handle;
+    #endif
 
     #if IO_PLATFORM_WINDOWS
     struct io_overlap ov;
@@ -145,17 +151,16 @@ void io_context_free(struct io_context *ioc);
  * bytes actually written from "dst". 
  */
 bool io_start_recv(struct io_context *ioc, io_handle handle,
-                   void *dst, uint32_t max, void *user);
+                   void *dst, uint32_t max);
 
 /*
  * Works like "io_start_recv" but for sending.
  */
 bool io_start_send(struct io_context *ioc, io_handle handle,
-                   void *src, uint32_t num, void *user);
+                   void *src, uint32_t num);
 
 
-bool io_start_accept(struct io_context *ioc, io_handle handle,
-                     void *user);
+bool io_start_accept(struct io_context *ioc, io_handle handle);
 
 /*
  * Wait for the completion of an I/O event.
@@ -163,11 +168,20 @@ bool io_start_accept(struct io_context *ioc, io_handle handle,
 void io_wait(struct io_context *ioc,
              struct io_event *ev);
 
+/*
+ * Flags for "io_open_file" and "io_create_file"
+ */
+enum {
+    IO_ACCESS_RD = 1 << 0,
+    IO_ACCESS_WR = 1 << 1,
+    IO_CREATE_OVERWRITE = 1 << 2,
+    IO_CREATE_CANTEXIST = 1 << 3,
+};
+
 io_handle io_open_file(struct io_context *ioc,
-                       const char *name, int flags);
+                       const char *name, int flags,
+                       void *user);
 
 io_handle io_create_file(struct io_context *ioc,
-                         const char *name, int flags);
-
-io_handle io_listen(struct io_context *ioc,
-                    const char *addr, int port);
+                         const char *name, int flags,
+                         void *user);
