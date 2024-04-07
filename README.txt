@@ -4,4 +4,4 @@ TinyIO is a cross-platform (Windows and Linux) API for asynchronous I/O operatio
 
 <<< WARNING >>> It's likely that the io_uring code has some bugs, so be wary! Also bug reports are appreciated :)
 
-I released into the public domain, so you can just adapt the code for your own projects. Pull requests would be appreciated though.
+It's released in the public domain, so you can just adapt the code for your own projects. Pull requests would be appreciated though.
