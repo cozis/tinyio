@@ -28,12 +28,12 @@
  * The OS handle type.
  */
 #if IO_PLATFORM_LINUX
-typedef int io_handle;
-#define IO_INVALID_HANDLE -1
+typedef int io_raw_handle;
 #elif IO_PLATFORM_WINDOWS
-typedef void *io_handle;
-#define IO_INVALID_HANDLE ((void*) -1)
+typedef void *io_raw_handle;
 #endif
+
+typedef uint16_t io_handle;
 
 /*
  * Windows calls this structure OVERLAPPED
@@ -53,6 +53,18 @@ struct io_overlap {
 };
 #endif
 
+enum io_resource_type {
+    IO_RES_VOID,
+    IO_RES_FILE,
+    IO_RES_SOCKET,
+};
+
+struct io_resource {
+    enum io_resource_type type;
+    io_raw_handle raw_handle;
+    uint16_t headop;
+};
+
 enum io_optype {
     IO_VOID,
     IO_RECV,
@@ -60,18 +72,20 @@ enum io_optype {
     IO_ACCEPT,
 };
 
+#define IO_SOCKADDR_IN_SIZE 16
+
 struct io_operation {
 
-    void *user;
+    io_handle handle;
+    uint16_t  nextop;
 
     enum io_optype type;
-
-    #if IO_PLATFORM_LINUX
-    io_handle handle;
-    #endif
+    void          *user;
 
     #if IO_PLATFORM_WINDOWS
+    io_raw_handle accept_handle;
     struct io_overlap ov;
+    char accept_buffer[2 * (IO_SOCKADDR_IN_SIZE + 16)];
     #endif
 };
 
@@ -104,9 +118,11 @@ struct io_completion_queue {
 
 struct io_context {
 
-    io_handle handle;
-    uint32_t max_ops;
+    io_raw_handle raw_handle;
+    uint16_t max_ops;
+    uint16_t max_res;
     struct io_operation *ops;
+    struct io_resource  *res;
 
     #if IO_PLATFORM_LINUX
     struct io_submission_queue submissions;
@@ -118,6 +134,7 @@ struct io_event {
     bool error;
     void *user;
     enum io_optype type;
+    io_handle handle;
 
     /*
      * Operation-specific results
@@ -125,15 +142,22 @@ struct io_event {
     union {
         uint32_t num;     // recv, send
         io_handle handle; // accept
-    };
+    } data;
 };
+
+
+bool io_global_init(void);
+
+void io_global_free(void);
 
 /*
  * Initialize an I/O context
  */
 bool io_context_init(struct io_context *ioc,
+                     struct io_resource *res,
                      struct io_operation *ops,
-                     uint32_t max_ops);
+                     uint16_t max_res,
+                     uint16_t max_ops);
 
 /*
  * Deinitialize an I/O context. This will not close any previously
@@ -185,3 +209,10 @@ io_handle io_open_file(struct io_context *ioc,
 io_handle io_create_file(struct io_context *ioc,
                          const char *name, int flags,
                          void *user);
+
+io_handle io_listen(struct io_context *ioc,
+                    const char *addr, int port,
+                    void *user);
+
+void io_close(struct io_context *ioc,
+              io_handle handle);

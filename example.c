@@ -1,13 +1,16 @@
 #include <stdio.h>
-#include "io.h"
+#include "io2.h"
 
 #define NUM_OPS 3
 
 int main()
 {
+    io_global_init();
+
     struct io_operation ops[100];
+    struct io_resource  res[100];
     struct io_context ioc;
-    if (!io_context_init(&ioc, ops, sizeof(ops)/sizeof(ops[0])))
+    if (!io_init(&ioc, res, ops, sizeof(res)/sizeof(res[0]), sizeof(ops)/sizeof(ops[0])))
         return -1;
     
     io_handle files[NUM_OPS];
@@ -36,5 +39,6 @@ int main()
     }
 
     io_context_free(&ioc);
+    io_global_free();
     return 0;
 }

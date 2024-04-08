@@ -5,76 +5,73 @@
 
 #include <string.h>
 
-/*
- * Declare Windows symbols locally to avoid including windows.h
- */
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <mswsock.h>
 
-#define GENERIC_READ  0x80000000ULL
-#define GENERIC_WRITE 0x40000000ULL
-
-#define CREATE_NEW    1
-#define CREATE_ALWAYS 2
-#define OPEN_EXISTING 3
-#define OPEN_ALWAYS   4
-
-#define FILE_ATTRIBUTE_NORMAL 0x00000080ULL
-#define FILE_FLAG_OVERLAPPED  0x40000000ULL
-
-#define ERROR_IO_PENDING 997l
-
-struct security_attr {
-    unsigned long size;
-    void *desc;
-    int inherit_handle;
-};
-
-extern void*
-CreateFileA(const char *name, unsigned long access,
-            unsigned long share, struct security_attr *sec,
-            unsigned long creation, unsigned long flags, 
-            void *template);
-
-extern int
-ReadFile(void *handle, void *dst, unsigned long max,
-         unsigned long *num, struct io_overlap *ov);
-
-extern int
-WriteFile(void *handle, const void *src, unsigned long max,
-          unsigned long *num, struct io_overlap *ov);
-
-extern void*
-CreateIoCompletionPort(void *handle, void *existing_ioport,
-                       unsigned long *ptr, unsigned long num_threads);
-
-extern int
-CloseHandle(void *handle);
-
-extern unsigned long
-GetLastError();
-
-extern int
-GetQueuedCompletionStatus(void *ioport, unsigned long *num, unsigned long *key, struct io_overlap **ov, unsigned long timeout);
-
-bool io_context_init(struct io_context *ioc,
-                     struct io_operation *ops,
-                     uint32_t max_ops)
+bool io_global_init(void)
 {
-    io_handle handle = CreateIoCompletionPort(IO_INVALID_HANDLE, NULL, 0, 1);
-    if (handle == IO_INVALID_HANDLE)
+    WSADATA data;
+    int ret = WSAStartup(MAKEWORD(2, 2), &data);
+    return ret == NO_ERROR;
+}
+
+void io_global_free(void)
+{
+    WSACleanup();
+}
+
+bool io_context_init(struct io_context   *ioc,
+                     struct io_resource  *res,
+                     struct io_operation *ops,
+                     uint16_t max_res,
+                     uint16_t max_ops)
+{
+    io_raw_handle raw_handle = CreateIoCompletionPort(IO_INVALID_HANDLE, NULL, 0, 1);
+    if (raw_handle == INVALID_HANDLE_VALUE)
         return false;
     
     for (uint32_t i = 0; i < max_ops; i++)
         ops[i].type = IO_VOID;
 
-    ioc->handle = handle;
+    ioc->raw_handle = raw_handle;
+    ioc->max_res = max_res;
     ioc->max_ops = max_ops;
+    ioc->res = res;
     ioc->ops = ops;
     return true;
 }
 
 void io_context_free(struct io_context *ioc)
 {
-    CloseHandle(ioc->handle);
+    for (uint32_t i = 0; i < ioc->max_res; i++)
+        if (ioc->res[i].type != IO_RES_VOID)
+            io_close(ioc, i);
+    CloseHandle(ioc->raw_handle);
+}
+
+void io_close(struct io_context *ioc,
+              io_handle handle)
+{
+    // TODO: Check handle
+
+    struct io_resource *res = &ioc->res[handle];
+
+    if (res->type == IO_RES_SOCKET)
+        closesocket(res->raw_handle);
+    else
+        CloseHandle(res->raw_handle);
+
+    uint16_t op_idx = res->head_operation;
+    while (op_idx != -1) {
+        struct io_operation *op;
+        op = &ioc->ops[op_idx];
+        op->type = IO_VOID;
+        op_idx = op->next_operation;
+    }
+
+    res->typ = IO_RES_VOID;
 }
 
 static struct io_operation *alloc_op(struct io_context *ioc)
@@ -86,12 +83,15 @@ static struct io_operation *alloc_op(struct io_context *ioc)
 }
 
 bool io_start_recv(struct io_context *ioc, io_handle handle,
-                   void *dst, uint32_t max)
+                   void *dst, uint32_t max, void *user)
 {
     if (handle == IO_INVALID_HANDLE)
         return false;
+    
+    struct io_resource *res = &ioc->res[handle];
 
-    struct io_operation *op = alloc_op(ioc);
+    struct io_operation *op;
+    op = alloc_op(ioc);
     if (op == NULL)
         return false;
 
@@ -102,6 +102,9 @@ bool io_start_recv(struct io_context *ioc, io_handle handle,
 		return false;
 
     op->type = IO_RECV;
+    op->handle = handle;
+    op->nextop = res->headop;
+    res->headop = op - ioc->ops;
     return true;
 }
 
@@ -122,6 +125,9 @@ bool io_start_send(struct io_context *ioc, io_handle handle,
 		return false;
 
     op->type = IO_SEND;
+    op->handle = handle;
+    op->nextop = res->headop;
+    res->headop = op - ioc->ops;
     return true;
 }
 
@@ -130,8 +136,50 @@ bool io_start_accept(struct io_context *ioc, io_handle handle)
     if (handle == IO_INVALID_HANDLE)
         return false;
 
-    // TODO
-    return false;
+    struct io_resource *rs = &ioc->res[handle];
+
+    struct io_operation *op = alloc_op(ioc);
+    if (op == NULL)
+        return false;
+
+    memset(&op->ov, 0, sizeof(struct io_overlap));
+    
+    SOCKET new_raw_handle = socket(AF_INET, SOCK_STREAM, 0);
+    if (new_raw_handle == INVALID_HANDLE_VALUE)
+        return false;
+
+    LPFN_ACCEPTEX lpfnAcceptEx = NULL;
+    GUID GuidAcceptEx = WSAID_ACCEPTEX;
+
+    unsigned long num;
+    int ret = WSAIoctl(rs->raw_handle,
+             SIO_GET_EXTENSION_FUNCTION_POINTER,
+             &GuidAcceptEx, sizeof(GuidAcceptEx), 
+             &lpfnAcceptEx, sizeof(lpfnAcceptEx), 
+             &num, NULL, NULL);
+    if (ret == SOCKET_ERROR) {
+        closesocket(new_raw_handle);
+        return false;
+    }
+
+    _Static_assert(IO_SOCKADDR_IN_SIZE == sizeof(struct sockaddr_in));
+
+    int ok = lpfnAcceptEx(handle2, rs->raw_handle, op->accept_buffer,
+                 sizeof(op->accept_buffer) - ((sizeof(struct sockaddr_in) + 16) * 2),
+                 sizeof(struct sockaddr_in) + 16, 
+                 sizeof(struct sockaddr_in) + 16,
+                 &num, &op->ov);
+    if (!ok) {
+        closesocket(new_raw_handle);
+        return false;
+    }
+
+    op->type = IO_ACCEPT;
+    op->handle = handle;
+    op->nextop = res->headop;
+    res->headop = op - ioc->ops;
+    op->accept_handle = new_raw_handle;
+    return true;
 }
 
 static unsigned long
@@ -153,18 +201,22 @@ void io_wait(struct io_context *ioc, struct io_event *ev)
     void *user;
 	struct io_overlap *ov;
     unsigned long num;
-	int ok = GetQueuedCompletionStatus(ioc->handle, &num, (unsigned long*) &user, &ov, convert_timeout(-1));
+	int ok = GetQueuedCompletionStatus(ioc->raw_handle, &num, &user, &ov, convert_timeout(-1));
 
     if (!ok) {
 
         if (ov == NULL) {
+
             /*
              * General failure
              */
+
             ev->error = true;
             ev->user  = NULL; // The user must discriminate between general errors and specific operation errors through the user pointer. Not ideal
             ev->type  = IO_VOID;
+
         } else {
+
             /*
              * Operation failure
              */
@@ -179,7 +231,11 @@ void io_wait(struct io_context *ioc, struct io_event *ev)
                 default:break;
                 case IO_RECV: ev->num = 0; break;
                 case IO_SEND: ev->num = 0; break;
-                case IO_ACCEPT: ev->handle = IO_INVALID_HANDLE; break;
+                
+                case IO_ACCEPT:
+                closesocket(op->accept_handle);
+                op->accept_handle = IO_INVALID_HANDLE;
+                break;
             }
 
             op->type = IO_VOID; // Mark unused
@@ -197,7 +253,7 @@ void io_wait(struct io_context *ioc, struct io_event *ev)
         default:break;
         case IO_RECV: ev->num = num; break;
         case IO_SEND: ev->num = num; break;
-        case IO_ACCEPT: /* TODO */ break;
+        case IO_ACCEPT: op->accept_handle; break;
     }
 
     op->type = IO_VOID; // Mark unused
@@ -250,6 +306,13 @@ io_handle io_create_file(struct io_context *ioc,
     return handle;
 }
 
+io_handle io_listen(struct io_context *ioc,
+                    const char *addr, int port,
+                    void *user)
+{
+    return IO_INVALID_HANDLE;
+}
+
 #endif
 
 
@@ -259,8 +322,19 @@ io_handle io_create_file(struct io_context *ioc,
 #include <assert.h>
 #include <string.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
+
+bool io_global_init(void)
+{
+    return true;
+}
+
+void io_global_free(void)
+{
+}
 
 static int 
 io_uring_setup(unsigned entries,
@@ -365,6 +439,18 @@ bool io_context_init(struct io_context *ioc,
 void io_context_free(struct io_context *ioc)
 {
     close(ioc->handle);
+}
+
+void io_close(struct io_context *ioc,
+              io_handle handle)
+{
+    for (uint32_t i = 0; i < ioc->max_ops; i++)
+        if (ioc->ops[i].handle == handle) {
+            assert(ioc->ops[i].type == IO_VOID);
+            ioc->ops[i].handle = IO_INVALID_HANDLE;
+            ioc->ops[i].user = NULL;
+        }
+    close(handle);
 }
 
 static bool start_oper(struct io_context *ioc,
@@ -616,6 +702,53 @@ io_handle io_create_file(struct io_context *ioc,
     op->handle = fd;
     op->user = user;
     return fd;
+}
+
+io_handle io_listen(struct io_context *ioc,
+                    const char *addr, int port,
+                    void *user)
+{
+    if (port < 1 || port > UINT16_MAX)
+        return IO_INVALID_HANDLE;
+
+    struct in_addr addr2;
+    if (addr == NULL)
+        addr2.s_addr = INADDR_ANY;
+    else {
+        if (1 != inet_pton(AF_INET, addr, &addr2))
+            return IO_INVALID_HANDLE;
+    }
+
+    struct io_operation *op;
+    op = unassociated_operation_struct(ioc);
+    if (op == NULL)
+        return IO_INVALID_HANDLE;
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return IO_INVALID_HANDLE;
+    
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+    struct sockaddr_in buf;
+    buf.sin_family = AF_INET;
+    buf.sin_port = htons(port);
+    buf.sin_addr = addr2;
+    if (bind(fd, (struct sockaddr*) &buf, sizeof(buf))) {
+        close(fd);
+        return IO_INVALID_HANDLE;
+    }
+
+    int backlog = 32;
+    if (listen(fd, backlog)) {
+        close(fd);
+        return IO_INVALID_HANDLE;
+    }
+
+    op->handle = fd;
+    op->user = user;
+    return (io_handle) fd;
 }
 
 #endif
