@@ -13,7 +13,7 @@
 # else
 #   define IO_PLATFORM_WINDOWS 0
 #   define IO_PLATFORM_LINUX   0
-#   define IO_PLATFORM_OTHER   0
+#   define IO_PLATFORM_OTHER   1
 # endif
 
 #include <stdint.h>
