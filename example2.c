@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <assert.h>
-#include "io2.h"
+#include "io.h"
 
 #define MAX_RES 100
 #define MAX_OPS 100
