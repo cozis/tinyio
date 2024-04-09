@@ -1,45 +1,35 @@
+#include <stdint.h>
+#include <stdbool.h>
 
 #define IO_VERSION_MAJOR 0
 #define IO_VERSION_MINOR 0
 
-# ifdef _WIN32
+#ifdef _WIN32
 #   define IO_PLATFORM_WINDOWS 1
 #   define IO_PLATFORM_LINUX   0
 #   define IO_PLATFORM_OTHER   0
-# elif __linux__
+#elif __linux__
 #   define IO_PLATFORM_WINDOWS 0
 #   define IO_PLATFORM_LINUX   1
 #   define IO_PLATFORM_OTHER   0
-# else
+#else
 #   define IO_PLATFORM_WINDOWS 0
 #   define IO_PLATFORM_LINUX   0
 #   define IO_PLATFORM_OTHER   1
-# endif
-
-#include <stdint.h>
-#include <stdbool.h>
-
-#if IO_PLATFORM_LINUX
-#include <stdatomic.h>
-#include <linux/io_uring.h>
 #endif
 
-/*
- * The OS handle type.
- */
-#if IO_PLATFORM_LINUX
-typedef int io_raw_handle;
-#elif IO_PLATFORM_WINDOWS
-typedef void *io_raw_handle;
-#endif
-
-typedef uint16_t io_handle;
-
-/*
- * Windows calls this structure OVERLAPPED
- */
 #if IO_PLATFORM_WINDOWS
-struct io_overlap {
+typedef void *io_os_handle;
+#endif
+
+#if IO_PLATFORM_LINUX
+typedef int io_os_handle;
+#endif
+
+typedef uint32_t io_handle;
+#define IO_INVALID ((uint32_t) -1)
+
+struct io_os_overlap {
     unsigned long *internal;
     unsigned long *internal_high;
     union {
@@ -50,19 +40,6 @@ struct io_overlap {
         void *pointer;
     };
     void *event;
-};
-#endif
-
-enum io_resource_type {
-    IO_RES_VOID,
-    IO_RES_FILE,
-    IO_RES_SOCKET,
-};
-
-struct io_resource {
-    enum io_resource_type type;
-    io_raw_handle raw_handle;
-    uint16_t headop;
 };
 
 enum io_optype {
@@ -76,15 +53,30 @@ enum io_optype {
 
 struct io_operation {
 
-    io_handle handle;
-    uint16_t  nextop;
-
     enum io_optype type;
-    void          *user;
+    struct io_resource *res;
+    void *user;
 
     #if IO_PLATFORM_WINDOWS
-    io_raw_handle accept_handle;
-    struct io_overlap ov;
+    io_os_handle accepted;
+    struct io_os_overlap ov;
+    #endif
+};
+
+enum io_restype {
+    IO_RES_VOID,
+    IO_RES_FILE,
+    IO_RES_SOCKET,
+};
+
+struct io_resource {
+    enum io_restype type;
+    io_os_handle os_handle;
+    uint16_t pending;
+    uint16_t gen;
+
+    #if IO_PLATFORM_WINDOWS
+    void *acceptfn;
     char accept_buffer[2 * (IO_SOCKADDR_IN_SIZE + 16)];
     #endif
 };
@@ -117,12 +109,11 @@ struct io_completion_queue {
 #endif
 
 struct io_context {
-
-    io_raw_handle raw_handle;
-    uint16_t max_ops;
+    io_os_handle os_handle;
     uint16_t max_res;
+    uint16_t max_ops;
+    struct io_resource *res;
     struct io_operation *ops;
-    struct io_resource  *res;
 
     #if IO_PLATFORM_LINUX
     struct io_submission_queue submissions;
@@ -130,70 +121,54 @@ struct io_context {
     #endif
 };
 
-struct io_event {
-    bool error;
-    void *user;
-    enum io_optype type;
-    io_handle handle;
-
-    /*
-     * Operation-specific results
-     */
-    union {
-        uint32_t num;     // recv, send
-        io_handle handle; // accept
-    } data;
+enum io_evtype {
+    IO_ERROR,
+    IO_ABORT,
+    IO_COMPLETE,
 };
 
+struct io_event {
+    enum io_evtype evtype;
+    enum io_optype optype;
+    io_handle handle;
+    void *user;
+
+    union {
+        uint32_t num;
+        io_handle accepted;
+    };
+};
 
 bool io_global_init(void);
-
 void io_global_free(void);
 
-/*
- * Initialize an I/O context
- */
-bool io_context_init(struct io_context *ioc,
-                     struct io_resource *res,
-                     struct io_operation *ops,
-                     uint16_t max_res,
-                     uint16_t max_ops);
+bool io_init(struct io_context   *ioc,
+             struct io_resource  *res,
+             struct io_operation *ops,
+             uint16_t max_res,
+             uint16_t max_ops);
 
-/*
- * Deinitialize an I/O context. This will not close any previously
- * created handles.
- */
-void io_context_free(struct io_context *ioc);
+void io_free(struct io_context *ioc);
 
-/*
- * Start an asynchronous receive operation on the handle. 
- * Only one pending receive operation per handle is supported.
- * 
- * When the operation completes, one of the following calls to
- * "io_wait" will return a completion event associated to this
- * recv. The "num" field of the event will hold the number of
- * bytes actually written from "dst". 
- */
-bool io_start_recv(struct io_context *ioc, io_handle handle,
-                   void *dst, uint32_t max);
-
-/*
- * Works like "io_start_recv" but for sending.
- */
-bool io_start_send(struct io_context *ioc, io_handle handle,
-                   void *src, uint32_t num);
-
-
-bool io_start_accept(struct io_context *ioc, io_handle handle);
-
-/*
- * Wait for the completion of an I/O event.
- */
 void io_wait(struct io_context *ioc,
              struct io_event *ev);
 
+bool io_recv(struct io_context *ioc,
+             void *user, io_handle handle,
+             void *dsc, uint32_t max);
+
+bool io_send(struct io_context *ioc,
+             void *user, io_handle handle,
+             void *src, uint32_t num);
+
+bool io_accept(struct io_context *ioc,
+               void *user, io_handle handle);
+
+void io_close(struct io_context *ioc,
+              io_handle handle);
+
 /*
- * Flags for "io_open_file" and "io_create_file"
+ * Flags for io_open_file and io_create_file
  */
 enum {
     IO_ACCESS_RD = 1 << 0,
@@ -203,16 +178,10 @@ enum {
 };
 
 io_handle io_open_file(struct io_context *ioc,
-                       const char *name, int flags,
-                       void *user);
+                       const char *file, int flags);
 
 io_handle io_create_file(struct io_context *ioc,
-                         const char *name, int flags,
-                         void *user);
+                         const char *file, int flags);
 
-io_handle io_listen(struct io_context *ioc,
-                    const char *addr, int port,
-                    void *user);
-
-void io_close(struct io_context *ioc,
-              io_handle handle);
+io_handle io_start_server(struct io_context *ioc,
+                          const char *addr, int port);

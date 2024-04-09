@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "io2.h"
+#include "io.h"
 
 #define NUM_OPS 3
 
