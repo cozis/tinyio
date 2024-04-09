@@ -1,3 +1,5 @@
+#include <stdint.h>
+#include <stdbool.h>
 
 #define IO_VERSION_MAJOR 0
 #define IO_VERSION_MINOR 0
@@ -38,7 +40,7 @@ struct io_os_overlap {
         void *pointer;
     };
     void *event;
-}:
+};
 
 enum io_optype {
     IO_VOID,
@@ -56,7 +58,7 @@ struct io_operation {
     void *user;
 
     #if IO_PLATFORM_WINDOWS
-    struct io_os_handle accepted;
+    io_os_handle accepted;
     struct io_os_overlap ov;
     char accept_buffer[2 * (IO_SOCKADDR_IN_SIZE + 16)];
     #endif
@@ -72,6 +74,7 @@ struct io_resource {
     enum io_restype type;
     io_os_handle os_handle;
     uint16_t pending;
+    uint16_t gen;
 };
 
 struct io_context {

@@ -18,15 +18,15 @@ int main()
     for (int i = 0; i < NUM_OPS; i++) {
         char name[1<<8];
         snprintf(name, sizeof(name), "file_%d.txt", i);
-        files[i] = io_create_file(&ioc, name, IO_CREATE_CANTEXIST, NULL);
-        if (files[i] == IO_INVALID_HANDLE)
+        files[i] = io_create_file(&ioc, name, IO_CREATE_CANTEXIST);
+        if (files[i] == IO_INVALID)
             fprintf(stderr, "Couldn't create '%s'\n", name);
     }
 
     int started = 0;
     char msg[] = "Hello, world!\n";
     for (int i = 0; i < NUM_OPS; i++) {
-        if (io_start_send(&ioc, files[i], msg, sizeof(msg)-1))
+        if (io_send(&ioc, NULL, files[i], msg, sizeof(msg)-1))
             started++;
         else
             fprintf(stderr, "ERROR\n");
@@ -38,7 +38,7 @@ int main()
         fprintf(stderr, "CONCLUDED\n");
     }
 
-    io_context_free(&ioc);
+    io_free(&ioc);
     io_global_free();
     return 0;
 }
