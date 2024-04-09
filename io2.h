@@ -60,7 +60,6 @@ struct io_operation {
     #if IO_PLATFORM_WINDOWS
     io_os_handle accepted;
     struct io_os_overlap ov;
-    char accept_buffer[2 * (IO_SOCKADDR_IN_SIZE + 16)];
     #endif
 };
 
@@ -75,6 +74,11 @@ struct io_resource {
     io_os_handle os_handle;
     uint16_t pending;
     uint16_t gen;
+
+    #if IO_PLATFORM_WINDOWS
+    void *acceptfn;
+    char accept_buffer[2 * (IO_SOCKADDR_IN_SIZE + 16)];
+    #endif
 };
 
 struct io_context {

@@ -392,25 +392,13 @@ static bool io_accept_windows(struct io_context   *ioc,
     if (new_os_handle == INVALID_SOCKET)
         return false;
 
-    LPFN_ACCEPTEX lpfnAcceptEx = NULL;
-    GUID GuidAcceptEx = WSAID_ACCEPTEX;
-
-    unsigned long num;
-    int ret = WSAIoctl((SOCKET) os_handle,
-             SIO_GET_EXTENSION_FUNCTION_POINTER,
-             &GuidAcceptEx, sizeof(GuidAcceptEx), 
-             &lpfnAcceptEx, sizeof(lpfnAcceptEx), 
-             &num, NULL, NULL);
-    if (ret == SOCKET_ERROR) {
-        DEBUG_LOG("WSAIoctl failure\n");
-        closesocket(new_os_handle);
-        return false;
-    }
+    LPFN_ACCEPTEX lpfnAcceptEx = res->acceptfn;
 
     _Static_assert(IO_SOCKADDR_IN_SIZE == sizeof(struct sockaddr_in));
 
-    int ok = lpfnAcceptEx((SOCKET) os_handle, new_os_handle, op->accept_buffer,
-                          sizeof(op->accept_buffer) - ((sizeof(struct sockaddr_in) + 16) * 2),
+    unsigned long num;
+    int ok = lpfnAcceptEx((SOCKET) os_handle, new_os_handle, res->accept_buffer,
+                          sizeof(res->accept_buffer) - ((sizeof(struct sockaddr_in) + 16) * 2),
                           sizeof(struct sockaddr_in) + 16, 
                           sizeof(struct sockaddr_in) + 16,
                           &num, (OVERLAPPED*) &op->ov);
@@ -743,10 +731,24 @@ io_handle io_start_server(struct io_context *ioc,
     }
 
     #if IO_PLATFORM_WINDOWS
+    LPFN_ACCEPTEX lpfnAcceptEx = NULL;
+    GUID GuidAcceptEx = WSAID_ACCEPTEX;
+    unsigned long num;
+    int ret = WSAIoctl(fd,
+            SIO_GET_EXTENSION_FUNCTION_POINTER,
+            &GuidAcceptEx, sizeof(GuidAcceptEx),
+            &lpfnAcceptEx, sizeof(lpfnAcceptEx),
+            &num, NULL, NULL);
+    if (ret == SOCKET_ERROR) {
+        DEBUG_LOG("WSAIoctl failure\n");
+        closesocket(fd);
+        return IO_INVALID;
+    }
     if (CreateIoCompletionPort((HANDLE) fd, ioc->os_handle, 0, 0) == NULL) {
 		closesocket(fd);
 		return IO_INVALID;
 	}
+    res->acceptfn = lpfnAcceptEx;
     #endif
 
     res->type = IO_RES_SOCKET;
