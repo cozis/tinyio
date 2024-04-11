@@ -50,7 +50,7 @@ void io_global_free(void)
 }
 
 #if IO_PLATFORM_WINDOWS
-bool io_init_windows(struct io_context *ioc)
+static bool io_init_windows(struct io_context *ioc)
 {
     io_os_handle os_handle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
     if (os_handle == INVALID_HANDLE_VALUE)
@@ -62,7 +62,7 @@ bool io_init_windows(struct io_context *ioc)
 #endif
 
 #if IO_PLATFORM_WINDOWS
-void io_free_windows(struct io_context *ioc)
+static void io_free_windows(struct io_context *ioc)
 {
     CloseHandle(ioc->os_handle);
 }
@@ -85,7 +85,7 @@ io_uring_enter(int ring_fd, unsigned int to_submit,
 #endif
 
 #if IO_PLATFORM_LINUX
-bool io_init_linux(struct io_context *ioc)
+static bool io_init_linux(struct io_context *ioc)
 {
     
     struct io_uring_params p;
@@ -163,7 +163,7 @@ bool io_init_linux(struct io_context *ioc)
 #endif
 
 #if IO_PLATFORM_LINUX
-void io_free_linux(struct io_context *ioc)
+static void io_free_linux(struct io_context *ioc)
 {
     close(ioc->os_handle);
 }
