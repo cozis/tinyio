@@ -198,6 +198,7 @@ static void clear_res(struct io_resource *res)
 {
     res->type = IO_RES_VOID;
     res->pending = 0;
+    res->callback = NULL;
 
     #if IO_PLATFORM_WINDOWS
     res->os_handle = INVALID_HANDLE_VALUE;
@@ -818,8 +819,8 @@ op_from_ov(struct io_os_overlap *ov)
 
 #if IO_PLATFORM_WINDOWS
 static void
-io_wait_windows(struct io_context *ioc,
-                struct io_event *ev)
+io_wait_internal_windows(struct io_context *ioc,
+                         struct io_event *ev)
 {
     int timeout = -1;
 
@@ -928,8 +929,8 @@ io_wait_windows(struct io_context *ioc,
 
 #if IO_PLATFORM_LINUX
 static void
-io_wait_linux(struct io_context *ioc,
-              struct io_event *ev)
+io_wait_internal_linux(struct io_context *ioc,
+                       struct io_event *ev)
 {
     /* --- Read barrier --- */
     unsigned int head = atomic_load(ioc->completions.head);
@@ -984,8 +985,9 @@ io_wait_linux(struct io_context *ioc,
 }
 #endif
 
-void io_wait(struct io_context *ioc,
-             struct io_event *ev)
+static void
+io_wait_internal(struct io_context *ioc,
+                 struct io_event *ev)
 {
     #if IO_PLATFORM_WINDOWS
     io_wait_windows(ioc, ev);
@@ -994,4 +996,38 @@ void io_wait(struct io_context *ioc,
     #if IO_PLATFORM_LINUX
     io_wait_linux(ioc, ev);
     #endif
+}
+
+void io_wait(struct io_context *ioc,
+             struct io_event *ev)
+{
+    for (;;) {
+
+        io_wait_internal(ioc, ev);
+
+        if (ev->handle == IO_INVALID)
+            break;
+
+        assert(ev->handle != IO_INVALID);
+
+        struct io_resource *res;
+        res = res_from_handle(ioc, ev->handle);
+        assert(res);
+
+        if (res->callback == NULL)
+            break;
+
+        res->callback(*ev);
+    }
+}
+
+void io_set_callback(struct io_context *ioc,
+                     io_handle handle,
+                     io_callback callback)
+{
+    struct io_resource *res;
+    res = res_from_handle(ioc, handle);
+    if (res == NULL)
+        return;
+    res->callback = callback;
 }

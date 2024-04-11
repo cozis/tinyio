@@ -63,17 +63,39 @@ struct io_operation {
     #endif
 };
 
+enum io_evtype {
+    IO_ERROR,
+    IO_ABORT,
+    IO_COMPLETE,
+};
+
+struct io_event {
+    enum io_evtype evtype;
+    enum io_optype optype;
+    io_handle handle;
+    void *user;
+
+    union {
+        uint32_t num;
+        io_handle accepted;
+    };
+};
+
 enum io_restype {
     IO_RES_VOID,
     IO_RES_FILE,
     IO_RES_SOCKET,
 };
 
+typedef void (*io_callback)(struct io_event);
+
 struct io_resource {
     enum io_restype type;
     io_os_handle os_handle;
     uint16_t pending;
     uint16_t gen;
+
+    io_callback callback;
 
     #if IO_PLATFORM_WINDOWS
     void *acceptfn;
@@ -119,24 +141,6 @@ struct io_context {
     struct io_submission_queue submissions;
     struct io_completion_queue completions;
     #endif
-};
-
-enum io_evtype {
-    IO_ERROR,
-    IO_ABORT,
-    IO_COMPLETE,
-};
-
-struct io_event {
-    enum io_evtype evtype;
-    enum io_optype optype;
-    io_handle handle;
-    void *user;
-
-    union {
-        uint32_t num;
-        io_handle accepted;
-    };
 };
 
 bool io_global_init(void);
@@ -185,3 +189,7 @@ io_handle io_create_file(struct io_context *ioc,
 
 io_handle io_start_server(struct io_context *ioc,
                           const char *addr, int port);
+
+void io_set_callback(struct io_context *ioc,
+                     io_handle handle,
+                     io_callback callback);
