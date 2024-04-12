@@ -990,11 +990,11 @@ io_wait_internal(struct io_context *ioc,
                  struct io_event *ev)
 {
     #if IO_PLATFORM_WINDOWS
-    io_wait_windows(ioc, ev);
+    io_wait_internal_windows(ioc, ev);
     #endif
 
     #if IO_PLATFORM_LINUX
-    io_wait_linux(ioc, ev);
+    io_wait_internal_linux(ioc, ev);
     #endif
 }
 

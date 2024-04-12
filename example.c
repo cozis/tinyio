@@ -12,7 +12,7 @@ int main()
     struct io_context ioc;
     if (!io_init(&ioc, res, ops, sizeof(res)/sizeof(res[0]), sizeof(ops)/sizeof(ops[0])))
         return -1;
-    
+
     io_handle files[NUM_OPS];
 
     for (int i = 0; i < NUM_OPS; i++) {
