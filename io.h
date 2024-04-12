@@ -81,13 +81,15 @@ struct io_event {
     };
 };
 
+struct io_context;
+
+typedef void (*io_callback)(struct io_context *ioc, struct io_event);
+
 enum io_restype {
     IO_RES_VOID,
     IO_RES_FILE,
     IO_RES_SOCKET,
 };
-
-typedef void (*io_callback)(struct io_event);
 
 struct io_resource {
     enum io_restype type;

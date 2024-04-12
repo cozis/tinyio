@@ -1017,7 +1017,7 @@ void io_wait(struct io_context *ioc,
         if (res->callback == NULL)
             break;
 
-        res->callback(*ev);
+        res->callback(ioc, *ev);
     }
 }
 
